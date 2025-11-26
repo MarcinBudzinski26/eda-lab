@@ -31,6 +31,20 @@ export class EDAAppStack extends cdk.Stack {
       tableName: "Imagess",
  });
 
+    //  NEW
+    const dlq = new sqs.Queue(this, "img-dlq", {
+      receiveMessageWaitTime: cdk.Duration.seconds(10),
+ });
+    // UPDATE
+    const queue = new sqs.Queue(this, "img-created-queue", {
+      receiveMessageWaitTime: cdk.Duration.seconds(10),
+      deadLetterQueue: {
+        queue: dlq,
+        maxReceiveCount: 1
+ }
+ });
+
+
       // Integration infrastructure
 
   const imageProcessQueue = new sqs.Queue(this, "img-process-q", {
@@ -75,6 +89,17 @@ export class EDAAppStack extends cdk.Stack {
       entry: `${__dirname}/../lambdas/mailer.ts`,
     });
 
+  const rejectedImageFn = new lambdanode.NodejsFunction(
+  this,
+  "RejectedImagesFn",
+  {
+    runtime: lambda.Runtime.NODEJS_20_X,
+    entry: `${__dirname}/../lambdas/rejectedImages.ts`,
+    timeout: cdk.Duration.seconds(15),
+    memorySize: 128,
+  }
+);
+
 
 
     // S3 --> SQS
@@ -104,8 +129,15 @@ export class EDAAppStack extends cdk.Stack {
       maxBatchingWindow: cdk.Duration.seconds(5),
     });
 
+    const rejectedImageEventSource = new events.SqsEventSource(dlq, {
+     batchSize: 5,
+      maxBatchingWindow: cdk.Duration.seconds(10),
+    });
+
+
     processImageFn.addEventSource(newImageEventSource);
 
+    rejectedImageFn.addEventSource(rejectedImageEventSource);
     // Permissions
 
     imagesBucket.grantRead(processImageFn);
